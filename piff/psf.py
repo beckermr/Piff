@@ -116,8 +116,9 @@ class PSF(object):
         """
         raise NotImplementedError("Derived classes must define the parseKwargs function")
 
+    # for apoinzation sims in the first round, default was apodize=(1.0, 4.25)
     def draw(self, x, y, chipnum=None, flux=1.0, center=None, offset=None, stamp_size=48,
-             image=None, logger=None, apodize=(1.0, 4.25), **kwargs):
+             image=None, logger=None, apodize=None, **kwargs):
         r"""Draws an image of the PSF at a given location.
 
         The normal usage would be to specify (chipnum, x, y), in which case Piff will use the
@@ -257,7 +258,7 @@ class PSF(object):
 
         return image
 
-    def get_profile(self, x, y, chipnum=None, flux=1.0, logger=None, **kwargs):
+    def get_profile(self, x, y, chipnum=None, flux=1.0, logger=None, symmetrize_90=True, **kwargs):
         r"""Get the PSF profile at the given position as a GalSim GSObject.
 
         The normal usage would be to specify (chipnum, x, y), in which case Piff will use the
@@ -286,6 +287,7 @@ class PSF(object):
         :param chipnum:     Which chip to use for WCS information. [required if the psf model
                             covers more than a single chip]
         :param flux:        Flux of PSF model [default: 1.0]
+        :param symmetrize_90: Symmetrize the profile by adding a 90 degree rotated version to itself.
         :param \**kwargs:   Any additional properties required for the interpolation.
 
         :returns:           (profile, method)
@@ -320,6 +322,9 @@ class PSF(object):
 
         # The last step is implementd in the derived classes.
         prof, method = self._getProfile(star)
+
+        if symmetrize_90:
+            prof = (prof + prof.rotate(90 * galsim.degrees)) / 2.0
         return prof, method
 
     def _check_chipnum(self, chipnum):
