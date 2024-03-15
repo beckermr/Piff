@@ -42,6 +42,164 @@ def _ap_kern_kern(x, m, h):
     return apval
 
 
+MODEL_FIT = "MOFFAT"
+GMIX_MODELS = ["GAUSS", "TURB", "EXP", "DEV"]
+NPIX_FIT = 21
+
+# def _get_moffat_prior(rng, flux):
+#     """
+#     get a prior for a moffat fit
+#     """
+#     import ngmix
+
+#     cen_prior = ngmix.priors.CenPrior(
+#         cen1=0, cen2=0, sigma1=0.263, sigma2=0.263,
+#         rng=rng,
+#     )
+#     g_prior = ngmix.priors.GPriorBA(0.5, rng=rng)
+#     hlr_prior = ngmix.priors.LMBounds(0.2, 5.0, rng=rng)
+#     beta_prior = ngmix.priors.LMBounds(2.0, 5.0, rng=rng)
+#     flux_prior = ngmix.priors.LMBounds(0.1 * flux, 10 * flux, rng=rng)
+
+#     # it is called fracdev in this prior, but it represents beta
+#     return ngmix.joint_prior.PriorBDFSep(
+#         cen_prior=cen_prior,
+#         g_prior=g_prior,
+#         T_prior=hlr_prior,
+#         fracdev_prior=beta_prior,
+#         F_prior=flux_prior,
+#     )
+
+
+class MoffatGuesser(object):
+    """
+    Make Moffat guesses from the input T, flux and prior
+
+    parameters
+    ----------
+    T: float
+        Center for T guesses
+    flux: float or sequences
+        Center for flux guesses
+    prior:
+        cen, g drawn from this prior
+    """
+
+    def __init__(self, hlr, flux, rng):
+        self.hlr = hlr
+        self.flux = flux
+        self.rng = rng
+
+    def __call__(self):
+        """
+        Generate a guess
+        """
+        import numpy as np
+
+        rng = self.rng
+
+        if MODEL_FIT == "MOFFAT":
+            guess = np.zeros(7)
+
+            # 0.6 is roughly fwhm 0.9
+            hlr_mid = self.hlr
+            flux_mid = self.flux
+
+            guess[0] = rng.uniform(low=-0.1, high=0.1)
+            guess[1] = rng.uniform(low=-0.1, high=0.1)
+            guess[2] = rng.uniform(low=-0.1, high=0.1)
+            guess[3] = rng.uniform(low=-0.1, high=0.1)
+            guess[4] = rng.uniform(low=0.9 * hlr_mid, high=1.1 * hlr_mid)
+            guess[5] = rng.uniform(low=1.5, high=3)
+            guess[6] = rng.uniform(low=0.9 * flux_mid, high=1.1 * flux_mid)
+        elif MODEL_FIT in GMIX_MODELS:
+            guess = np.zeros(6)
+
+            # 0.6 is roughly fwhm 0.9
+            hlr_mid = self.hlr
+            flux_mid = self.flux
+
+            guess[0] = rng.uniform(low=-0.1, high=0.1)
+            guess[1] = rng.uniform(low=-0.1, high=0.1)
+            guess[2] = rng.uniform(low=-0.1, high=0.1)
+            guess[3] = rng.uniform(low=-0.1, high=0.1)
+            guess[4] = rng.uniform(low=0.9 * hlr_mid, high=1.1 * hlr_mid)
+            # guess[5] = rng.uniform(low=1.5, high=3)
+            guess[5] = rng.uniform(low=0.9 * flux_mid, high=1.1 * flux_mid)
+
+        return guess
+
+
+def _do_ngmix_fit(*, img, cen_xy, scale, ntry=10):
+    import ngmix
+    from hashlib import sha1
+
+    data = img.tobytes()
+    _hash = sha1(data)
+    seed = np.frombuffer(_hash.digest(), dtype='uint32')
+    rng = np.random.RandomState(seed)
+
+    obs = ngmix.Observation(
+        img,
+        jacobian=ngmix.DiagonalJacobian(
+            row=cen_xy[1] - 1,  # ngmix is zero offset
+            col=cen_xy[0] - 1,  # ngmix is zero offset
+            scale=scale,
+        )
+    )
+
+    flux = obs.image.sum()
+    # prior = _get_moffat_prior(
+    #     rng=rng,
+    #     flux=obs.image.sum(),
+    # )
+    # # hlr = 0.5 * (prior.T_prior.minval + prior.T_prior.maxval)
+    # hlr = 0.6
+    prior = None
+    hlr = 0.6
+
+    if MODEL_FIT == "MOFFAT":
+        guesser = MoffatGuesser(
+            hlr=hlr,
+            flux=flux,
+            rng=rng,
+        )
+        fitter = ngmix.fitting.GalsimMoffatFitter(prior)
+    elif MODEL_FIT in GMIX_MODELS:
+        guesser = MoffatGuesser(
+            hlr=hlr,
+            flux=flux,
+            rng=rng,
+        )
+        fitter = ngmix.fitting.Fitter(MODEL_FIT.lower())
+
+    for i in range(ntry):
+        guess = guesser()
+        res = fitter.go(obs=obs, guess=guess)
+        if res['flags'] == 0:
+            break
+
+    if MODEL_FIT == "MOFFAT":
+        if res["flags"] == 0:
+            return res["pars"], res
+        else:
+            return None, res
+        # beta_ind = 5
+        # if (
+        #     res["flags"] == 0
+        #     and res["pars"][beta_ind] >= 2
+        #     and res["pars_err"][beta_ind] <= 1
+        # ):
+        #     return res["pars"], res
+        # else:
+        #     return None, res
+    elif MODEL_FIT in GMIX_MODELS:
+        if res["flags"] == 0:
+            return res["pars"], res
+        else:
+            return None, res
+
+
 class PSF(object):
     """The base class for describing a PSF model across a field of view.
 
@@ -118,7 +276,7 @@ class PSF(object):
 
     # for apoinzation sims in the first round, default was apodize=(1.0, 4.25)
     def draw(self, x, y, chipnum=None, flux=1.0, center=None, offset=None, stamp_size=48,
-             image=None, logger=None, apodize=None, **kwargs):
+             image=None, logger=None, apodize=None, use_smooth_model=True, **kwargs):
         r"""Draws an image of the PSF at a given location.
 
         The normal usage would be to specify (chipnum, x, y), in which case Piff will use the
@@ -193,7 +351,10 @@ class PSF(object):
 
         chipnum = self._check_chipnum(chipnum)
 
-        prof, method = self.get_profile(x,y,chipnum=chipnum, flux=flux, logger=logger, **kwargs)
+        prof, method = self.get_profile(
+            x, y, chipnum=chipnum, flux=flux,
+            logger=logger, use_smooth_model=use_smooth_model, **kwargs
+        )
 
         logger.debug("Drawing star at (%s,%s) on chip %s", x, y, chipnum)
 
@@ -258,7 +419,10 @@ class PSF(object):
 
         return image
 
-    def get_profile(self, x, y, chipnum=None, flux=1.0, logger=None, symmetrize_90=True, **kwargs):
+    def get_profile(
+        self, x, y, chipnum=None, flux=1.0, logger=None,
+        symmetrize_90=False, use_smooth_model=True, **kwargs
+    ):
         r"""Get the PSF profile at the given position as a GalSim GSObject.
 
         The normal usage would be to specify (chipnum, x, y), in which case Piff will use the
@@ -308,24 +472,141 @@ class PSF(object):
         if len(kwargs) != 0:
             raise TypeError("Unexpected keyword argument(s) %r"%list(kwargs.keys())[0])
 
-        image_pos = galsim.PositionD(x,y)
-        wcs = self.wcs[chipnum]
-        field_pos = StarData.calculateFieldPos(image_pos, wcs, self.pointing, properties)
-        u,v = field_pos.x, field_pos.y
+        if use_smooth_model:
+            wcs = self.wcs[chipnum]
+            prof = self._eval_smooth_model(
+                wcs=wcs, x=x, y=y, **properties,
+            ).withFlux(flux)
+            method = "auto"
+        else:
+            image_pos = galsim.PositionD(x,y)
+            wcs = self.wcs[chipnum]
+            field_pos = StarData.calculateFieldPos(image_pos, wcs, self.pointing, properties)
+            u,v = field_pos.x, field_pos.y
 
-        star = Star.makeTarget(x=x, y=y, u=u, v=v, wcs=wcs, properties=properties,
-                               pointing=self.pointing)
-        logger.debug("Getting PSF profile at (%s,%s) on chip %s", x, y, chipnum)
+            star = Star.makeTarget(x=x, y=y, u=u, v=v, wcs=wcs, properties=properties,
+                                pointing=self.pointing)
+            logger.debug("Getting PSF profile at (%s,%s) on chip %s", x, y, chipnum)
 
-        # Interpolate and adjust the flux of the star.
-        star = self.interpolateStar(star).withFlux(flux)
+            # Interpolate and adjust the flux of the star.
+            star = self.interpolateStar(star).withFlux(flux)
 
-        # The last step is implementd in the derived classes.
-        prof, method = self._getProfile(star)
+            # The last step is implementd in the derived classes.
+            prof, method = self._getProfile(star)
 
         if symmetrize_90:
             prof = (prof + prof.rotate(90 * galsim.degrees)) / 2.0
+
         return prof, method
+
+    def _compute_smooth_model(self, *, wcs, properties, chipnum):
+        from scipy.interpolate import RegularGridInterpolator
+
+        self._smooth_model_failed = False
+        self._smooth_model = None
+        self._smooth_model_properties = sorted(
+            (k for k in properties if k not in ["x", "y", "u", "v", "chipnum"])
+        )
+        self._smooth_model_fitter = None
+
+        dxy = 256
+        x_space = np.linspace(0.5, 2048+0.5, 2048 // dxy + 1) / 2049
+        y_space = np.linspace(0.5, 4096+0.5, 4096 // dxy + 1) / 4097
+        assert len(self._smooth_model_properties) == 1
+        if self._smooth_model_properties[0].lower() == "gi_color":
+            color_space = np.linspace(0, 2, 8)
+        elif self._smooth_model_properties[0].lower() == "iz_color":
+            color_space = np.linspace(0, 2, 8)
+        else:
+            raise ValueError(
+                "Unknown smooth model property "
+                f"{self._smooth_model_properties}"
+            )
+
+        from hashlib import sha1
+        import os
+
+        assert self.file_name is not None
+        data = os.path.basename(self.file_name).encode()
+        _hash = sha1(data)
+        seed = np.frombuffer(_hash.digest(), dtype='uint32')
+        rng = np.random.RandomState(seed)
+
+        pars = None
+
+        for j, y in enumerate(y_space):
+            for i, x in enumerate(x_space):
+                for k, color in enumerate(color_space):
+                    _x = x + rng.uniform(low=-0.5, high=0.5) / 2049
+                    _y = y + rng.uniform(low=-0.5, high=0.5) / 4097
+
+                    nxy_2 = (NPIX_FIT + 1) / 2
+                    cen = (
+                        nxy_2 + _x - int(x+0.5),
+                        nxy_2 + _y - int(y+0.5),
+                    )
+                    image = galsim.Image(NPIX_FIT, NPIX_FIT, scale=0.263)
+                    prop = {self._smooth_model_properties[0]: color}
+                    image = self.draw(
+                        _x, _y,
+                        chipnum=chipnum,
+                        use_smooth_model=False,
+                        image=image,
+                        center=cen,
+                        **prop,
+                    )
+                    _pars, _fitr = _do_ngmix_fit(
+                        img=image.array, cen_xy=cen, scale=0.263,
+                    )
+                    if _pars is None:
+                        self._smooth_model_failed = True
+                        return
+
+                    if pars is None:
+                        pars = np.zeros((
+                            len(y_space),
+                            len(x_space),
+                            len(color_space),
+                            len(_pars)-1)
+                        )
+                    pars[j, i, k] = _pars[:-1]
+
+        self._smooth_model = {
+            chipnum: RegularGridInterpolator(
+                (y_space, x_space, color_space),
+                pars,
+                bounds_error=False,
+                fill_value=None,
+                method="pchip",
+            )
+        }
+        self._smooth_model_fitter = _fitr
+
+    def _eval_smooth_model(self, *, wcs, x, y, chipnum, **properties):
+        if not hasattr(self, "_smooth_model"):
+            self._compute_smooth_model(
+                wcs=wcs,
+                properties=list(properties.keys()),
+                chipnum=chipnum,
+            )
+
+        if self._smooth_model_failed:
+            raise RuntimeError("Failed to compute smooth model")
+            # return galsim.Moffat(beta=2.5, half_light_radius=0.6)
+        else:
+            _props = [x / 2049, y / 4097] + [
+                properties[k]
+                for k in self._smooth_model_properties
+            ]
+            pars = self._smooth_model[chipnum](_props)[0, :]
+            pars = np.concatenate((pars, [1.0]), axis=0)
+            if MODEL_FIT == "MOFFAT":
+                return self._smooth_model_fitter.make_model(pars)
+            elif MODEL_FIT in GMIX_MODELS:
+                import ngmix
+                return ngmix.gmix.make_gmix_model(
+                    pars, MODEL_FIT.lower()
+                ).make_galsim_object()
 
     def _check_chipnum(self, chipnum):
         chipnums = list(self.wcs.keys())
@@ -471,10 +752,10 @@ class PSF(object):
 
         with fitsio.FITS(file_name,'r') as f:
             logger.debug('opened FITS file')
-            return cls._read(f, 'psf', logger)
+            return cls._read(f, 'psf', logger, file_name=file_name)
 
     @classmethod
-    def _read(cls, fits, extname, logger):
+    def _read(cls, fits, extname, logger, file_name=None):
         """This is the function that actually does the work for the read function.
         Composite PSF classes that need to iterate can call this multiple times as needed.
 
@@ -518,6 +799,8 @@ class PSF(object):
 
         # Save the piff version as an attibute.
         psf.piff_version = piff_version
+
+        psf.file_name = file_name
 
         return psf
 
