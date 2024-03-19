@@ -24,6 +24,17 @@ import sys
 from .star import Star, StarData
 from .util import write_kwargs, read_kwargs
 
+from ngmix.defaults import LOWVAL
+from ngmix.fitting import FitModel
+from ngmix.gexceptions import GMixRangeError
+from ngmix import (
+    observation,
+    MultiBandObsList,
+    ObsList,
+    Observation,
+)
+from ngmix.fitting.galsim_fitters import GalsimFitter
+
 
 def _ap_kern_kern(x, m, h):
     # cumulative triweight kernel
@@ -42,9 +53,12 @@ def _ap_kern_kern(x, m, h):
     return apval
 
 
-MODEL_FIT = "MOFFAT"
+MODEL_FIT = "TURB"
 GMIX_MODELS = ["GAUSS", "TURB", "EXP", "DEV"]
-NPIX_FIT = 21
+NPIX_FIT = 19
+USE_CEN = False
+DXY = 256
+DCOLOR = 8
 
 # def _get_moffat_prior(rng, flux):
 #     """
@@ -127,7 +141,394 @@ class MoffatGuesser(object):
             # guess[5] = rng.uniform(low=1.5, high=3)
             guess[5] = rng.uniform(low=0.9 * flux_mid, high=1.1 * flux_mid)
 
+        if USE_CEN:
+            return guess[2:]
+        else:
+            return guess
+
+
+class CenGalsimMoffatFitModel(FitModel):
+    """
+    Represent a fitting model for fitting 6 parameter models with galsim,
+    as well as generate images and mixtures for the best fit model
+
+    Parameters
+    ----------
+    obs: observation(s)
+        Observation, ObsList, or MultiBandObsList
+    model: string
+        e.g. 'exp', 'spergel'
+    guess: array-like
+        starting parameters for the lm fitter
+    prior: ngmix prior, optional
+        For example ngmix.priors.PriorSimpleSep can
+        be used as a separable prior on center, g, size, flux.
+    """
+
+    def __init__(self, obs, model, guess, prior=None):
+        self.model = model
+        self['model'] = model
+        self._set_model_class()
+        self._set_prior(prior=prior)
+        self._set_bounds()
+
+        self._set_kobs(obs)
+        self._set_n_prior_pars()
+        self._set_totpix()
+        self._set_fdiff_size()
+        self._init_model_images()
+        self._set_band_pars()
+
+        guess = self._get_guess(guess)
+
+    def _set_g(self):
+        self["g"] = self["pars"][0:2].copy()
+        self["g_cov"] = self["pars_cov"][0:2, 0:2].copy()
+        self["g_err"] = self["pars_err"][0:2].copy()
+
+    def _set_T(self):
+        self["T"] = self["pars"][4-2]
+        self["T_err"] = np.sqrt(self["pars_cov"][4-2, 4-2])
+
+    def _set_flux(self):
+        start = 4
+        if self.nband == 1:
+            self["flux"] = self["pars"][start]
+            self["flux_err"] = np.sqrt(self["pars_cov"][start, start])
+        else:
+            self["flux"] = self["pars"][start:]
+            self["flux_err"] = np.sqrt(self["pars_cov"][start:, start:])
+
+    def calc_fdiff(self, pars):
+        """
+
+        vector with (model-data)/error.
+
+        The npars elements contain -ln(prior)
+        """
+
+        # we cannot keep sending existing array into leastsq, don't know why
+        fdiff = np.zeros(self.fdiff_size)
+
+        try:
+
+            self._fill_models(pars)
+
+            start = self._fill_priors(pars, fdiff)
+
+            for band in range(self.nband):
+
+                kobs_list = self.mb_kobs[band]
+                for kobs in kobs_list:
+
+                    meta = kobs.meta
+                    kmodel = meta["kmodel"]
+                    ierr = meta["ierr"]
+
+                    scratch = meta["scratch"]
+
+                    # model-data
+                    scratch.array[:, :] = kmodel.array[:, :]
+                    scratch -= kobs.kimage
+
+                    # (model-data)/err
+                    scratch.array.real[:, :] *= ierr.array[:, :]
+                    scratch.array.imag[:, :] *= ierr.array[:, :]
+
+                    # now copy into the full fdiff array
+                    imsize = scratch.array.size
+
+                    fdiff[start:start + imsize] = scratch.array.real.ravel()
+
+                    start += imsize
+
+                    fdiff[start:start + imsize] = scratch.array.imag.ravel()
+
+                    start += imsize
+
+        except GMixRangeError:
+            fdiff[:] = LOWVAL
+
+        return fdiff
+
+    def _fill_models(self, pars):
+        """
+        input pars are in linear space
+
+        Fill the list of lists of gmix objects for the given parameters
+        """
+        try:
+            for band, kobs_list in enumerate(self.mb_kobs):
+                # pars for this band, in linear space
+                band_pars = self.get_band_pars(pars, band)
+
+                for i, kobs in enumerate(kobs_list):
+
+                    gal = self.make_model(band_pars)
+
+                    meta = kobs.meta
+
+                    kmodel = meta["kmodel"]
+
+                    gal._drawKImage(kmodel)
+
+                    if kobs.has_psf():
+                        kmodel *= kobs.psf.kimage
+        except RuntimeError as err:
+            raise GMixRangeError(str(err))
+
+    def make_model(self, pars):
+        """
+        make the galsim model
+        """
+
+        model = self.make_round_model(pars)
+
+        # shift = pars[0:0+2]
+        g1 = pars[2-2]
+        g2 = pars[3-2]
+
+        # argh another generic error
+        try:
+            model = model.shear(g1=g1, g2=g2)
+        except ValueError as err:
+            raise GMixRangeError(str(err))
+
+        # model = model.shift(shift)
+        return model
+
+    def make_round_model(self, pars):
+        """
+        make the galsim Moffat model
+        """
+        import galsim
+
+        r50 = pars[4-2]
+        beta = pars[5-2]
+        flux = pars[6-2]
+
+        # generic RuntimeError thrown
+        try:
+            gal = galsim.Moffat(beta, half_light_radius=r50, flux=flux,)
+        except RuntimeError as err:
+            raise GMixRangeError(str(err))
+
+        return gal
+
+    def _set_model_class(self):
+        import galsim
+
+        self._model_class = galsim.Moffat
+
+    def get_band_pars(self, pars_in, band):
+        """
+        Get linear pars for the specified band
+
+        input pars are [c1, c2, e1, e2, r50, beta, flux1, flux2, ....]
+        """
+
+        pars = self._band_pars
+
+        pars[0:6-2] = pars_in[0:6-2]
+        pars[6-2] = pars_in[6-2 + band]
+        return pars
+
+    def _set_prior(self, prior=None):
+        self.prior = prior
+
+    def _set_n_prior_pars(self):
+        if self.prior is None:
+            self.n_prior_pars = 0
+        else:
+            #                 c1  c2  e1e2  r50  beta   fluxes
+            self.n_prior_pars = 1 + 1 + 1 + 1 + 1 + self.nband - 2
+
+    def _set_totpix(self):
+        """
+        Make sure the data are consistent.
+        """
+
+        totpix = 0
+        for kobs_list in self.mb_kobs:
+            for kobs in kobs_list:
+                totpix += kobs.kimage.array.size
+
+        self.totpix = totpix
+
+    def _convert2kobs(self, obs):
+        kobs = observation.make_kobs(obs)
+
+        return kobs
+
+    def _set_kobs(self, obs_in, **keys):
+        """
+        Input should be an Observation, ObsList, or MultiBandObsList
+        """
+
+        if isinstance(obs_in, (Observation, ObsList, MultiBandObsList)):
+            kobs = self._convert2kobs(obs_in)
+        else:
+            kobs = observation.get_kmb_obs(obs_in)
+
+        self.mb_kobs = kobs
+        self.nband = len(kobs)
+
+    def _set_fdiff_size(self):
+        # we have 2*totpix, since we use both real and imaginary
+        # parts
+        self.fdiff_size = self.n_prior_pars + 2 * self.totpix
+
+    def _create_models_in_kobs(self, kobs):
+        ex = kobs.kimage
+
+        meta = kobs.meta
+        meta["kmodel"] = ex.copy()
+        meta["scratch"] = ex.copy()
+
+    def _init_model_images(self):
+        """
+        add model image entries to the metadata for
+        each observation
+
+        these will get filled in
+        """
+
+        for kobs_list in self.mb_kobs:
+            for kobs in kobs_list:
+                meta = kobs.meta
+
+                weight = kobs.weight
+                ierr = weight.copy()
+                ierr.setZero()
+
+                w = np.where(weight.array > 0)
+                if w[0].size > 0:
+                    ierr.array[w] = np.sqrt(weight.array[w])
+
+                meta["ierr"] = ierr
+                self._create_models_in_kobs(kobs)
+
+    def _check_guess(self, guess):
+        """
+        check the guess by making a model and checking for an
+        exception
+        """
+
+        guess = np.array(guess, dtype="f8", copy=False)
+        if guess.size != self.npars:
+            raise ValueError(
+                "expected %d entries in the "
+                "guess, but got %d" % (self.npars, guess.size)
+            )
+
+        for band in range(self.nband):
+            band_pars = self.get_band_pars(guess, band)
+            # just doing this to see if an exception is raised. This
+            # will bother flake8
+            gal = self.make_model(band_pars)  # noqa
+
         return guess
+
+    def _get_guess(self, guess):
+        """
+        make sure the guess has the right size and meets the model
+        restrictions
+        """
+
+        guess = self._check_guess(guess)
+        return guess
+
+    def _set_npars(self):
+        """
+        nband should be set in set_lists, called before this
+        """
+        from ngmix.fitting.galsim_results import get_galsim_npars
+        self.npars = get_galsim_npars(self.model, self.nband) - 2
+
+    def _set_band_pars(self):
+        """
+        this is the array we fill with pars for a specific band
+        """
+        self._set_npars()
+
+        npars_band = self.npars - self.nband + 1
+        self._band_pars = np.zeros(npars_band)
+
+    def set_fit_result(self, result):
+        """
+        Get some fit statistics for the input pars.
+        """
+
+        self.update(result)
+        if self['flags'] == 0:
+            self["s2n_r"] = self.calc_s2n_r(self['pars'])
+            self._set_g()
+            self._set_flux()
+
+    def calc_s2n_r(self, pars):
+        """
+        we already have the round r50, so just create the
+        models and don't shear them
+        """
+
+        s2n_sum = 0.0
+        for band, kobs_list in enumerate(self.mb_kobs):
+            # pars for this band, in linear space
+            band_pars = self.get_band_pars(pars, band)
+
+            for i, kobs in enumerate(kobs_list):
+                meta = kobs.meta
+                weight = kobs.weight
+
+                round_pars = band_pars.copy()
+                # round_pars[2:2+2] = 0.0
+                gal = self.make_model(round_pars)
+
+                kmodel = meta["kmodel"]
+
+                gal.drawKImage(image=kmodel)
+
+                if kobs.has_psf():
+                    kmodel *= kobs.psf.kimage
+                kmodel.real.array[:, :] *= kmodel.real.array[:, :]
+                kmodel.imag.array[:, :] *= kmodel.imag.array[:, :]
+
+                kmodel.real.array[:, :] *= weight.array[:, :]
+                kmodel.imag.array[:, :] *= weight.array[:, :]
+
+                s2n_sum += kmodel.real.array.sum()
+                s2n_sum += kmodel.imag.array.sum()
+
+        if s2n_sum > 0.0:
+            s2n = np.sqrt(s2n_sum)
+        else:
+            s2n = 0.0
+
+        return s2n
+
+
+class CenGalsimMoffatFitter(GalsimFitter):
+    """
+    Fit a moffat model using galsim
+
+    Parameters
+    ----------
+    model: string
+        e.g. 'exp', 'spergel'
+    prior: ngmix prior, optional
+        For example ngmix.priors.PriorSimpleSep can
+        be used as a separable prior on center, g, size, flux.
+    fit_pars: dict, optional
+        parameters for the lm fitter, e.g. maxfev, ftol, xtol
+    """
+
+    def __init__(self, prior=None, fit_pars=None):
+        super().__init__(model="moffat", prior=prior, fit_pars=fit_pars)
+
+    def _make_fit_model(self, obs, guess):
+        return CenGalsimMoffatFitModel(
+            model="moffat", obs=obs, guess=guess, prior=self.prior,
+        )
 
 
 def _do_ngmix_fit(*, img, cen_xy, scale, ntry=10):
@@ -141,6 +542,7 @@ def _do_ngmix_fit(*, img, cen_xy, scale, ntry=10):
 
     obs = ngmix.Observation(
         img,
+        weight=np.abs(np.ones_like(img)),
         jacobian=ngmix.DiagonalJacobian(
             row=cen_xy[1] - 1,  # ngmix is zero offset
             col=cen_xy[0] - 1,  # ngmix is zero offset
@@ -164,7 +566,14 @@ def _do_ngmix_fit(*, img, cen_xy, scale, ntry=10):
             flux=flux,
             rng=rng,
         )
-        fitter = ngmix.fitting.GalsimMoffatFitter(prior)
+        if USE_CEN:
+            fitter = CenGalsimMoffatFitter(
+                prior=prior,
+            )
+        else:
+            fitter = ngmix.fitting.GalsimMoffatFitter(
+                prior=prior,
+            )
     elif MODEL_FIT in GMIX_MODELS:
         guesser = MoffatGuesser(
             hlr=hlr,
@@ -180,20 +589,42 @@ def _do_ngmix_fit(*, img, cen_xy, scale, ntry=10):
             break
 
     if MODEL_FIT == "MOFFAT":
-        if res["flags"] == 0:
+        if USE_CEN:
+            beta_ind = 5-2
+        else:
+            beta_ind = 5
+        if (
+            res["flags"] == 0
+            and res["pars"][beta_ind] >= 2
+            and res["pars_err"][beta_ind] <= 1
+        ):
             return res["pars"], res
         else:
             return None, res
-        # beta_ind = 5
-        # if (
-        #     res["flags"] == 0
-        #     and res["pars"][beta_ind] >= 2
-        #     and res["pars_err"][beta_ind] <= 1
-        # ):
-        #     return res["pars"], res
-        # else:
-        #     return None, res
     elif MODEL_FIT in GMIX_MODELS:
+        _g1, _g2, _T = res["pars"][2:5]
+        try:
+            irr, irc, icc = ngmix.moments.g2mom(_g1, _g2, _T)
+            # this is a fudge factor that gets the overall PSF FWHM
+            # correct
+            # the naive correction for the pixel size is
+            # a bit too small
+            pixel_var = 0.263 * 0.263 / 12 * 1.73
+            irr -= pixel_var
+            icc -= pixel_var
+            _g1, _g2, _T = ngmix.moments.mom2g(irr, irc, icc)
+            res["pars"][2] = _g1
+            res["pars"][3] = _g2
+            res["pars"][4] = _T
+        except Exception:
+            _g1 = np.nan
+            _g2 = np.nan
+            _T = np.nan
+            res["pars"][2] = _g1
+            res["pars"][3] = _g2
+            res["pars"][4] = _T
+            res["flags"] |= 2**1
+
         if res["flags"] == 0:
             return res["pars"], res
         else:
@@ -473,9 +904,14 @@ class PSF(object):
             raise TypeError("Unexpected keyword argument(s) %r"%list(kwargs.keys())[0])
 
         if use_smooth_model:
-            wcs = self.wcs[chipnum]
+            if not hasattr(self, "_smooth_model"):
+                self._compute_smooth_model(
+                    wcs=self.wcs[chipnum],
+                    properties=list(properties.keys()),
+                    chipnum=chipnum,
+                )
             prof = self._eval_smooth_model(
-                wcs=wcs, x=x, y=y, **properties,
+                x=x, y=y, **properties,
             ).withFlux(flux)
             method = "auto"
         else:
@@ -509,14 +945,13 @@ class PSF(object):
         )
         self._smooth_model_fitter = None
 
-        dxy = 256
-        x_space = np.linspace(0.5, 2048+0.5, 2048 // dxy + 1) / 2049
-        y_space = np.linspace(0.5, 4096+0.5, 4096 // dxy + 1) / 4097
+        x_space = np.linspace(0.5, 2048+0.5, 2048 // DXY + 1) / 2049
+        y_space = np.linspace(0.5, 4096+0.5, 4096 // DXY + 1) / 4097
         assert len(self._smooth_model_properties) == 1
         if self._smooth_model_properties[0].lower() == "gi_color":
-            color_space = np.linspace(0, 2, 8)
+            color_space = np.linspace(0, 3.5, DCOLOR)
         elif self._smooth_model_properties[0].lower() == "iz_color":
-            color_space = np.linspace(0, 2, 8)
+            color_space = np.linspace(0, 0.65, DCOLOR)
         else:
             raise ValueError(
                 "Unknown smooth model property "
@@ -534,21 +969,24 @@ class PSF(object):
 
         pars = None
 
-        for j, y in enumerate(y_space):
-            for i, x in enumerate(x_space):
+        for j, _y in enumerate(y_space):
+            for i, _x in enumerate(x_space):
                 for k, color in enumerate(color_space):
-                    _x = x + rng.uniform(low=-0.5, high=0.5) / 2049
-                    _y = y + rng.uniform(low=-0.5, high=0.5) / 4097
+                    x = _x + rng.uniform(low=-0.5, high=0.5) / 2049
+                    y = _y + rng.uniform(low=-0.5, high=0.5) / 4097
+
+                    x *= 2049
+                    y *= 4097
 
                     nxy_2 = (NPIX_FIT + 1) / 2
                     cen = (
-                        nxy_2 + _x - int(x+0.5),
-                        nxy_2 + _y - int(y+0.5),
+                        nxy_2 + x - int(x+0.5),
+                        nxy_2 + y - int(y+0.5),
                     )
                     image = galsim.Image(NPIX_FIT, NPIX_FIT, scale=0.263)
                     prop = {self._smooth_model_properties[0]: color}
                     image = self.draw(
-                        _x, _y,
+                        x, y,
                         chipnum=chipnum,
                         use_smooth_model=False,
                         image=image,
@@ -582,19 +1020,12 @@ class PSF(object):
         }
         self._smooth_model_fitter = _fitr
 
-    def _eval_smooth_model(self, *, wcs, x, y, chipnum, **properties):
-        if not hasattr(self, "_smooth_model"):
-            self._compute_smooth_model(
-                wcs=wcs,
-                properties=list(properties.keys()),
-                chipnum=chipnum,
-            )
-
+    def _eval_smooth_model(self, *, x, y, chipnum, **properties):
         if self._smooth_model_failed:
             raise RuntimeError("Failed to compute smooth model")
-            # return galsim.Moffat(beta=2.5, half_light_radius=0.6)
+            return galsim.Moffat(beta=2.5, fwhm=1.0, flux=1.0)
         else:
-            _props = [x / 2049, y / 4097] + [
+            _props = [y / 4097, x / 2049] + [
                 properties[k]
                 for k in self._smooth_model_properties
             ]
@@ -606,7 +1037,7 @@ class PSF(object):
                 import ngmix
                 return ngmix.gmix.make_gmix_model(
                     pars, MODEL_FIT.lower()
-                ).make_galsim_object()
+                ).make_galsim_object().withFlux(1.0)
 
     def _check_chipnum(self, chipnum):
         chipnums = list(self.wcs.keys())
