@@ -16,6 +16,7 @@ jobs:
         runs-on: ${{ matrix.os }}
 
         strategy:
+            fail-fast: false
             matrix:
                 # First all python versions in basic linux
                 os: [ ubuntu-latest ]
