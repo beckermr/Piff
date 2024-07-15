@@ -82,7 +82,7 @@ jobs:
                 python -m pip install -U pip
 
                 # Do these first to clarify potential conflicts
-                pip install -U setuptools numpy
+                pip install -U setuptools "numpy<2"
 
                 # Standard dependencies
                 pip install -U -r requirements.txt
