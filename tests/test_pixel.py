@@ -1531,7 +1531,7 @@ def test_color():
         # Check the convenience function that an end user would typically use
         offset = s.center_to_offset(s.fit.center)
         image = psf.draw(x=s['x'], y=s['y'], color=s['color'],
-                         stamp_size=32, flux=s.fit.flux, offset=offset)
+                         stamp_size=32, flux=s.fit.flux, offset=offset, apodize=None)
         # They may be up to 1 pixel off in either direction, so find the common bounds.
         b = image.bounds & fit_stamp.bounds
         np.testing.assert_allclose(image[b].array, fit_stamp[b].array, rtol=1.e-6, atol=1.e-4)
