@@ -366,7 +366,7 @@ def test_single():
 
             # This is the more user-friendly way to do this.
             # Equivalent to ~machine precision.
-            im = psf.draw(x, y, chipnum=chipnum)
+            im = psf.draw(x, y, chipnum=chipnum, apodize=None)
             print('im = ',im)
             print('star im = ',star.data.image)
             print('max diff = ',np.max(np.abs(im.array - star.data.image.array)))
