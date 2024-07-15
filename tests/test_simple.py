@@ -309,7 +309,7 @@ def test_single_image():
 
     # test that draw works
     test_image = psf.draw(x=target['x'], y=target['y'], stamp_size=config['input']['stamp_size'],
-                          flux=target.fit.flux, offset=target.fit.center)
+                          flux=target.fit.flux, offset=target.fit.center, apodize=None)
     # this image should be the same values as test_star
     assert test_image == test_star.image
     # test that draw does not copy the image
