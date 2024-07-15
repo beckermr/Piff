@@ -743,7 +743,7 @@ def test_draw():
 
         # Now use the regular PSF.draw() command.  This version is equivalent to the above.
         # (It's not equal all the way to machine precision, but pretty close.)
-        im1 = psf.draw(x, y, chipnum, stamp_size=48)
+        im1 = psf.draw(x, y, chipnum, stamp_size=48, , apodize=None)
         np.testing.assert_allclose(im1.array, star.data.image.array, rtol=1.e-14, atol=1.e-14)
 
         # The wcs in the image is the wcs of the original image
