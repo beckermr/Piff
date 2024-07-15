@@ -612,7 +612,7 @@ def test_olddes():
     print('area at 0,0 = ',psf.wcs[0].pixelArea(galsim.PositionD(0,0)),' = %f**2'%(
             psf.wcs[0].pixelArea(galsim.PositionD(0,0))**0.5))
     assert np.isclose(psf.wcs[0].pixelArea(galsim.PositionD(0,0)), 0.2628**2, rtol=1.e-3)
-    image = psf.draw(x=103.3, y=592.0, logger=logger)
+    image = psf.draw(x=103.3, y=592.0, logger=logger, apodize=None)
     print('image shape = ',image.array.shape)
     print('image near center = ',image.array[23:26,23:26])
     print('image sum = ',image.array.sum())
@@ -668,7 +668,7 @@ def test_newdes():
     print('area at 0,0 = ',psf.wcs[0].pixelArea(galsim.PositionD(0,0)),' = %f**2'%(
             psf.wcs[0].pixelArea(galsim.PositionD(0,0))**0.5))
     assert np.isclose(psf.wcs[0].pixelArea(galsim.PositionD(0,0)), 0.263021**2, rtol=1.e-3)
-    image = psf.draw(x=103.3, y=592.0, logger=logger)
+    image = psf.draw(x=103.3, y=592.0, logger=logger, apodize=None)
     print('image shape = ',image.array.shape)
     print('image near center = ',image.array[23:26,23:26])
     print('image sum = ',image.array.sum())
