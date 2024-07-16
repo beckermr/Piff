@@ -253,6 +253,11 @@ def test_wrongwcs():
 def test_single():
     """Same as test_focal, but using the SingleCCD PSF type, which does a separate fit on each CCD.
     """
+
+    # turn off apodization
+    import piff.pixelgrid
+    piff.pixelgrid.APODIZE_PARAMS = None
+
     wcs1 = galsim.TanWCS(
             galsim.AffineTransform(0.26, 0.05, -0.08, -0.24, galsim.PositionD(1024,1024)),
             galsim.CelestialCoord(-5 * galsim.arcmin, -25 * galsim.degrees)
@@ -366,7 +371,7 @@ def test_single():
 
             # This is the more user-friendly way to do this.
             # Equivalent to ~machine precision.
-            im = psf.draw(x, y, chipnum=chipnum, apodize=None)
+            im = psf.draw(x, y, chipnum=chipnum)
             print('im = ',im)
             print('star im = ',star.data.image)
             print('max diff = ',np.max(np.abs(im.array - star.data.image.array)))
@@ -601,6 +606,10 @@ def test_olddes():
     else:
         logger = piff.config.setup_logger(log_file='output/test_olddes.log')
 
+    # turn off apodization
+    import piff.pixelgrid
+    piff.pixelgrid.APODIZE_PARAMS = None
+
     fname = os.path.join('input', 'D00240560_r_c01_r2362p01_piff.fits')
     psf = piff.PSF.read(fname, logger=logger)
 
@@ -612,7 +621,7 @@ def test_olddes():
     print('area at 0,0 = ',psf.wcs[0].pixelArea(galsim.PositionD(0,0)),' = %f**2'%(
             psf.wcs[0].pixelArea(galsim.PositionD(0,0))**0.5))
     assert np.isclose(psf.wcs[0].pixelArea(galsim.PositionD(0,0)), 0.2628**2, rtol=1.e-3)
-    image = psf.draw(x=103.3, y=592.0, logger=logger, apodize=None)
+    image = psf.draw(x=103.3, y=592.0, logger=logger)
     print('image shape = ',image.array.shape)
     print('image near center = ',image.array[23:26,23:26])
     print('image sum = ',image.array.sum())
@@ -628,7 +637,7 @@ def test_olddes():
 
     # Also check that it is picklable.
     psf2 = copy.deepcopy(psf)
-    image2 = psf2.draw(x=103.3, y=592.0, apodize=None)
+    image2 = psf2.draw(x=103.3, y=592.0)
     np.testing.assert_equal(image2.array, image.array)
 
 @timer
@@ -651,6 +660,10 @@ def test_newdes():
     else:
         logger = piff.config.setup_logger(log_file='output/test_newdes.log')
 
+    # turn off apodization
+    import piff.pixelgrid
+    piff.pixelgrid.APODIZE_PARAMS = None
+
     fname = os.path.join('input', 'D00232418_i_c19_r5006p01_piff-model.fits')
     with warnings.catch_warnings():
         # This file was written with GalSim 2.1, and now raises a deprecation warning for 2.2.
@@ -668,7 +681,7 @@ def test_newdes():
     print('area at 0,0 = ',psf.wcs[0].pixelArea(galsim.PositionD(0,0)),' = %f**2'%(
             psf.wcs[0].pixelArea(galsim.PositionD(0,0))**0.5))
     assert np.isclose(psf.wcs[0].pixelArea(galsim.PositionD(0,0)), 0.263021**2, rtol=1.e-3)
-    image = psf.draw(x=103.3, y=592.0, logger=logger, apodize=None)
+    image = psf.draw(x=103.3, y=592.0, logger=logger)
     print('image shape = ',image.array.shape)
     print('image near center = ',image.array[23:26,23:26])
     print('image sum = ',image.array.sum())
@@ -684,7 +697,7 @@ def test_newdes():
 
     # Also check that it is picklable.
     psf2 = copy.deepcopy(psf)
-    image2 = psf2.draw(x=103.3, y=592.0, apodize=None)
+    image2 = psf2.draw(x=103.3, y=592.0)
     np.testing.assert_equal(image2.array, image.array)
 
 @timer

@@ -139,6 +139,10 @@ def test_single_image():
     else:
         logger = piff.config.setup_logger(log_file='output/test_single_image.log')
 
+    # turn off apodization
+    import piff.pixelgrid
+    piff.pixelgrid.APODIZE_PARAMS = None
+
     # Make the image
     image = galsim.Image(2048, 2048, scale=0.26)
 
@@ -309,12 +313,12 @@ def test_single_image():
 
     # test that draw works
     test_image = psf.draw(x=target['x'], y=target['y'], stamp_size=config['input']['stamp_size'],
-                          flux=target.fit.flux, offset=target.fit.center, apodize=None)
+                          flux=target.fit.flux, offset=target.fit.center)
     # this image should be the same values as test_star
     assert test_image == test_star.image
     # test that draw does not copy the image
     image_ref = psf.draw(x=target['x'], y=target['y'], stamp_size=config['input']['stamp_size'],
-                         flux=target.fit.flux, offset=target.fit.center, image=test_image, apodize=None)
+                         flux=target.fit.flux, offset=target.fit.center, image=test_image)
     image_ref.array[0,0] = 123456789
     assert test_image.array[0,0] == image_ref.array[0,0]
     assert test_star.image.array[0,0] != test_image.array[0,0]
@@ -708,6 +712,10 @@ def test_draw():
     else:
         logger = piff.config.setup_logger(log_file='output/test_draw.log')
 
+    # turn off apodization
+    import piff.pixelgrid
+    piff.pixelgrid.APODIZE_PARAMS = None
+
     # Use an existing Piff solution to match as closely as possible how users would actually
     # use this function.
     psf = piff.read('input/test_single_py27.piff', logger=logger)
@@ -743,7 +751,7 @@ def test_draw():
 
         # Now use the regular PSF.draw() command.  This version is equivalent to the above.
         # (It's not equal all the way to machine precision, but pretty close.)
-        im1 = psf.draw(x, y, chipnum, stamp_size=48, apodize=None)
+        im1 = psf.draw(x, y, chipnum, stamp_size=48)
         np.testing.assert_allclose(im1.array, star.data.image.array, rtol=1.e-14, atol=1.e-14)
 
         # The wcs in the image is the wcs of the original image
@@ -768,13 +776,13 @@ def test_draw():
         # We can center the star at an arbitrary location on the image.
         # The default is equivalent to center=(x,y).  So check that this is equivalent.
         # Also, 48 is the default stamp size, so that can be omitted here.
-        im2 = psf.draw(x, y, chipnum, center=(x,y), apodize=None)
+        im2 = psf.draw(x, y, chipnum, center=(x,y))
         assert im2.bounds == im1.bounds
         np.testing.assert_allclose(im2.array, im1.array, rtol=1.e-14, atol=1.e-14)
 
         # Moving by an integer number of pixels should be very close to the same image
         # over a different slice of the array.
-        im3 = psf.draw(x, y, chipnum, center=(x+1, y+3), apodize=None)
+        im3 = psf.draw(x, y, chipnum, center=(x+1, y+3))
         assert im3.bounds == im1.bounds
         # (Remember -- numpy indexing is y,x!)
         # Also, the FFTs will be different in detail, so only match to 1.e-6.
@@ -788,14 +796,14 @@ def test_draw():
         # Can center at other locations, and the hsm centroids should come out centered pretty
         # close to that location.
         # (Of course the array will be different here, so can't test that.)
-        im4 = psf.draw(x, y, chipnum, center=(x+1.3,y-0.8), apodize=None)
+        im4 = psf.draw(x, y, chipnum, center=(x+1.3,y-0.8))
         assert im4.bounds == im1.bounds
         hsm = im4.FindAdaptiveMom()
         np.testing.assert_allclose(hsm.moments_centroid.x, x+1.3, atol=0.01)
         np.testing.assert_allclose(hsm.moments_centroid.y, y-0.8, atol=0.01)
 
         # Also allowed is center=True to place in the center of the image.
-        im5 = psf.draw(x, y, chipnum, center=True, apodize=None)
+        im5 = psf.draw(x, y, chipnum, center=True)
         assert im5.bounds == im1.bounds
         assert im5.array.shape == (48,48)
         np.testing.assert_allclose(im5.bounds.true_center.x, x, atol=0.5)
@@ -814,7 +822,7 @@ def test_draw():
         # then center=True works fine to draw in the center of that image.
         im6 = im5.copy()
         im6.setCenter(0,0)
-        psf.draw(x, y, chipnum, center=True, image=im6, apodize=None)
+        psf.draw(x, y, chipnum, center=True, image=im6)
         assert im6.bounds.center == galsim.PositionI(0,0)
         np.testing.assert_allclose(im6.array.sum(), 1., rtol=1.e-3)
         hsm = im6.FindAdaptiveMom()
@@ -824,7 +832,7 @@ def test_draw():
         np.testing.assert_allclose(im6.array, im5.array, rtol=1.e-14, atol=1.e-14)
 
         # Check non-even stamp size.  Also, not unit flux while we're at it.
-        im7 = psf.draw(x, y, chipnum, center=(x+1.3,y-0.8), stamp_size=43, flux=23.7, apodize=None)
+        im7 = psf.draw(x, y, chipnum, center=(x+1.3,y-0.8), stamp_size=43, flux=23.7)
         assert im7.array.shape == (43,43)
         np.testing.assert_allclose(im7.bounds.true_center.x, x, atol=0.5)
         np.testing.assert_allclose(im7.bounds.true_center.y, y, atol=0.5)
@@ -836,7 +844,7 @@ def test_draw():
         # Can't do mixed even/odd shape with stamp_size, but it will respect a provided image.
         im8 = galsim.Image(43,44)
         im8.setCenter(x,y)  # It will respect the given bounds, so put it near the right place.
-        psf.draw(x, y, chipnum, center=(x+1.3,y-0.8), image=im8, flux=23.7, apodize=None)
+        psf.draw(x, y, chipnum, center=(x+1.3,y-0.8), image=im8, flux=23.7)
         assert im8.array.shape == (44,43)
         np.testing.assert_allclose(im8.array.sum(), 23.7, rtol=1.e-3)
         hsm = im8.FindAdaptiveMom()
@@ -845,7 +853,7 @@ def test_draw():
 
         # The offset parameter can add an additional to whatever center is used.
         # Here center=None, so this is equivalent to im4 above.
-        im9 = psf.draw(x, y, chipnum, offset=(1.3,-0.8), apodize=None)
+        im9 = psf.draw(x, y, chipnum, offset=(1.3,-0.8))
         assert im9.bounds == im1.bounds
         hsm = im9.FindAdaptiveMom()
         np.testing.assert_allclose(im9.array, im4.array, rtol=1.e-14, atol=1.e-14)
@@ -854,7 +862,7 @@ def test_draw():
         # use for this, but it's allowed.  (The above with default center is used in unit
         # tests a number of times, so that version at least is useful if only for us.
         # I'm hard pressed to imaging end users wanting to specify things this way though.)
-        im10 = psf.draw(x, y, chipnum, center=(x+0.8, y-0.3), offset=(0.5,-0.5), apodize=None)
+        im10 = psf.draw(x, y, chipnum, center=(x+0.8, y-0.3), offset=(0.5,-0.5))
         assert im10.bounds == im1.bounds
         np.testing.assert_allclose(im10.array, im4.array, rtol=1.e-14, atol=1.e-14)
 
