@@ -628,7 +628,7 @@ def test_olddes():
 
     # Also check that it is picklable.
     psf2 = copy.deepcopy(psf)
-    image2 = psf2.draw(x=103.3, y=592.0)
+    image2 = psf2.draw(x=103.3, y=592.0, apodize=None)
     np.testing.assert_equal(image2.array, image.array)
 
 @timer
@@ -684,7 +684,7 @@ def test_newdes():
 
     # Also check that it is picklable.
     psf2 = copy.deepcopy(psf)
-    image2 = psf2.draw(x=103.3, y=592.0)
+    image2 = psf2.draw(x=103.3, y=592.0, apodize=None)
     np.testing.assert_equal(image2.array, image.array)
 
 @timer
