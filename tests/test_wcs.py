@@ -781,13 +781,18 @@ def test_newdes_apodize():
         piff.pixelgrid.set_apodize_params(appars)
         ims.append(psf.draw(x=103.3, y=592.0, logger=logger))
 
+    print('sum = ',ims[1].array.sum())
     assert not np.allclose(ims[0].array, ims[1].array)
     assert np.allclose(ims[1].array[0, :], 0, rtol=1.e-2)
     assert np.allclose(ims[1].array[-1, :], 0, rtol=1.e-2)
     assert np.allclose(ims[1].array[:, 0], 0, rtol=1.e-2)
     assert np.allclose(ims[1].array[:, -1], 0, rtol=1.e-2)
     assert ims[1].array.sum() > 0
-    print('sum = ',ims[1].array.sum())
+    np.testing.assert_allclose(
+        ims[0].array[23:26,22:25] / ims[0].array[23:26,22:25].sum(),
+        ims[1].array[23:26,22:25] / ims[1].array[23:26,22:25].sum(),
+        rtol=1.e-5,
+    )
 
 if __name__ == '__main__':
     #import cProfile, pstats
