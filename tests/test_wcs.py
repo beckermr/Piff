@@ -253,11 +253,6 @@ def test_wrongwcs():
 def test_single():
     """Same as test_focal, but using the SingleCCD PSF type, which does a separate fit on each CCD.
     """
-
-    # turn off apodization
-    import piff.pixelgrid
-    piff.pixelgrid.APODIZE_PARAMS = None
-
     wcs1 = galsim.TanWCS(
             galsim.AffineTransform(0.26, 0.05, -0.08, -0.24, galsim.PositionD(1024,1024)),
             galsim.CelestialCoord(-5 * galsim.arcmin, -25 * galsim.degrees)
@@ -606,10 +601,6 @@ def test_olddes():
     else:
         logger = piff.config.setup_logger(log_file='output/test_olddes.log')
 
-    # turn off apodization
-    import piff.pixelgrid
-    piff.pixelgrid.APODIZE_PARAMS = None
-
     fname = os.path.join('input', 'D00240560_r_c01_r2362p01_piff.fits')
     psf = piff.PSF.read(fname, logger=logger)
 
@@ -659,10 +650,6 @@ def test_newdes():
         logger = piff.config.setup_logger(verbose=2)
     else:
         logger = piff.config.setup_logger(log_file='output/test_newdes.log')
-
-    # turn off apodization
-    import piff.pixelgrid
-    piff.pixelgrid.APODIZE_PARAMS = None
 
     fname = os.path.join('input', 'D00232418_i_c19_r5006p01_piff-model.fits')
     with warnings.catch_warnings():

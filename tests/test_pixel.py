@@ -1436,10 +1436,6 @@ def test_var():
 def test_color():
     """Test having a color-dependent size.
     """
-    # turn off apodization
-    import piff.pixelgrid
-    piff.pixelgrid.APODIZE_PARAMS = None
-
     pixel_scale = 0.3
 
     image = galsim.ImageF(1024,1024, scale=pixel_scale)

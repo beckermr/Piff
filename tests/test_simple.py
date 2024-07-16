@@ -139,10 +139,6 @@ def test_single_image():
     else:
         logger = piff.config.setup_logger(log_file='output/test_single_image.log')
 
-    # turn off apodization
-    import piff.pixelgrid
-    piff.pixelgrid.APODIZE_PARAMS = None
-
     # Make the image
     image = galsim.Image(2048, 2048, scale=0.26)
 
@@ -711,10 +707,6 @@ def test_draw():
         logger = piff.config.setup_logger(verbose=2)
     else:
         logger = piff.config.setup_logger(log_file='output/test_draw.log')
-
-    # turn off apodization
-    import piff.pixelgrid
-    piff.pixelgrid.APODIZE_PARAMS = None
 
     # Use an existing Piff solution to match as closely as possible how users would actually
     # use this function.
