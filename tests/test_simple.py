@@ -314,7 +314,7 @@ def test_single_image():
     assert test_image == test_star.image
     # test that draw does not copy the image
     image_ref = psf.draw(x=target['x'], y=target['y'], stamp_size=config['input']['stamp_size'],
-                         flux=target.fit.flux, offset=target.fit.center, image=test_image)
+                         flux=target.fit.flux, offset=target.fit.center, image=test_image, apodize=None)
     image_ref.array[0,0] = 123456789
     assert test_image.array[0,0] == image_ref.array[0,0]
     assert test_star.image.array[0,0] != test_image.array[0,0]
