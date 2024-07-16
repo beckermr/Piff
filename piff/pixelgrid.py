@@ -25,6 +25,31 @@ from galsim import Lanczos
 from .model import Model
 from .star import Star, StarData, StarFit
 
+APODIZE_PARAMS = (1.0 * 0.263, 4.25 * 0.263)
+
+
+def set_apodize_params(pars):
+    global APODIZE_PARAMS
+    APODIZE_PARAMS = pars
+
+
+def _ap_kern_kern(x, m, h):
+    # cumulative triweight kernel
+    y = (x - m) / h + 3
+    apval = np.zeros_like(m)
+    msk = y > 3
+    apval[msk] = 1
+    msk = (y > -3) & (~msk)
+    apval[msk] = (
+        -5 * y[msk] ** 7 / 69984
+        + 7 * y[msk] ** 5 / 2592
+        - 35 * y[msk] ** 3 / 864
+        + 35 * y[msk] / 96
+        + 1 / 2
+    )
+    return apval
+
+
 class PixelGrid(Model):
     """A PSF modeled as interpolation between a grid of points.
 
@@ -445,6 +470,21 @@ class PixelGrid(Model):
         :returns: a galsim.GSObject instance
         """
         im = galsim.Image(params.reshape(self.size,self.size), scale=self.scale)
+
+        if APODIZE_PARAMS is not None:
+            xpix, ypix = im.get_pixel_centers()
+            # use_true_center = False below
+            dx = xpix - im.center.x
+            dy = ypix - im.center.y
+            r2 = dx**2 + dy**2
+
+            apwidth, aprad = APODIZE_PARAMS  # in arcsec
+            _apwidth = apwidth / self.scale  # convert to pixels
+            _aprad = aprad / self.scale  # convert to pixels
+
+            apim = im._array * _ap_kern_kern(_aprad, np.sqrt(r2), _apwidth)
+            im._array = apim / np.sum(apim) * np.sum(im._array)
+
         return galsim.InterpolatedImage(im, x_interpolant=self.interp,
                                         use_true_center=False, flux=1.)
 

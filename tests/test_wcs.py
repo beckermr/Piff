@@ -747,6 +747,53 @@ def test_des_wcs():
     np.testing.assert_allclose(wcs3.toWorld(im.center).y, wcs1.toWorld(im.center).y,
                                rtol=0.04)
 
+@timer
+def test_newdes_apodize():
+    # This is a DES Y6 PSF file made by Robert Gruendl using python 2, so
+    # check that this also works correctly.
+    try:
+        import pixmappy
+    except ImportError:
+        print('pixmappy not installed.  Skipping test_newdes()')
+        return
+    # Also make sure pixmappy is recent enough to work.
+    if 'exposure_file' not in pixmappy.GalSimWCS._opt_params:
+        print('pixmappy not recent enough version.  Skipping test_newdes()')
+        return
+
+    import piff
+    import piff.pixelgrid
+
+    if __name__ == '__main__':
+        logger = piff.config.setup_logger(verbose=2)
+    else:
+        logger = piff.config.setup_logger(log_file='output/test_newdes.log')
+
+    fname = os.path.join('input', 'D00232418_i_c19_r5006p01_piff-model.fits')
+    with warnings.catch_warnings():
+        # This file was written with GalSim 2.1, and now raises a deprecation warning for 2.2.
+        warnings.simplefilter("ignore", galsim.GalSimDeprecationWarning)
+        warnings.simplefilter("ignore", DeprecationWarning)
+        psf = piff.PSF.read(fname, logger=logger)
+
+    ims = []
+    for appars in [None, (1.0 * 0.263, 4.25 * 0.263)]:
+        piff.pixelgrid.set_apodize_params(appars)
+        ims.append(psf.draw(x=103.3, y=592.0, logger=logger))
+
+    print('sum = ',ims[1].array.sum())
+    assert not np.allclose(ims[0].array, ims[1].array)
+    assert np.allclose(ims[1].array[0, :], 0, rtol=1.e-2)
+    assert np.allclose(ims[1].array[-1, :], 0, rtol=1.e-2)
+    assert np.allclose(ims[1].array[:, 0], 0, rtol=1.e-2)
+    assert np.allclose(ims[1].array[:, -1], 0, rtol=1.e-2)
+    assert ims[1].array.sum() > 0
+    np.testing.assert_allclose(
+        ims[0].array[23:26,22:25] / ims[0].array[23:26,22:25].sum(),
+        ims[1].array[23:26,22:25] / ims[1].array[23:26,22:25].sum(),
+        rtol=1.e-5,
+    )
+
 if __name__ == '__main__':
     #import cProfile, pstats
     #pr = cProfile.Profile()
