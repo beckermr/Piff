@@ -24,7 +24,6 @@ import sys
 from .star import Star, StarData
 from .util import write_kwargs, read_kwargs
 
-
 class PSF(object):
     """The base class for describing a PSF model across a field of view.
 
