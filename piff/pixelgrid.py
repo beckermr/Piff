@@ -474,10 +474,10 @@ class PixelGrid(Model):
             r2 = dx**2 + dy**2
 
             apwidth, aprad = APODIZE_PARAMS  # in arcsec
-            apwidth /= self.scale  # convert to pixels
-            aprad /= self.scale  # convert to pixels
+            _apwidth = apwidth / self.scale  # convert to pixels
+            _aprad = aprad / self.scale  # convert to pixels
 
-            apim = im._array * _ap_kern_kern(aprad, np.sqrt(r2), apwidth)
+            apim = im._array * _ap_kern_kern(_aprad, np.sqrt(r2), _apwidth)
             im._array = apim / np.sum(apim) * np.sum(im._array)
 
         return galsim.InterpolatedImage(im, x_interpolant=self.interp,
