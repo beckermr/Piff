@@ -28,6 +28,11 @@ from .star import Star, StarData, StarFit
 APODIZE_PARAMS = (1.0 * 0.263, 4.25 * 0.263)
 
 
+def set_apodize_params(pars):
+    global APODIZE_PARAMS
+    APODIZE_PARAMS = pars
+
+
 def _ap_kern_kern(x, m, h):
     # cumulative triweight kernel
     y = (x - m) / h + 3

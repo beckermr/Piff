@@ -1,4 +1,4 @@
 # turn off apodization
 import piff.pixelgrid
 
-piff.pixelgrid.APODIZE_PARAMS = None
+piff.pixelgrid.set_apodize_params(None)
