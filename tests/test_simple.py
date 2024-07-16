@@ -788,14 +788,14 @@ def test_draw():
         # Can center at other locations, and the hsm centroids should come out centered pretty
         # close to that location.
         # (Of course the array will be different here, so can't test that.)
-        im4 = psf.draw(x, y, chipnum, center=(x+1.3,y-0.8))
+        im4 = psf.draw(x, y, chipnum, center=(x+1.3,y-0.8), apodize=None)
         assert im4.bounds == im1.bounds
         hsm = im4.FindAdaptiveMom()
         np.testing.assert_allclose(hsm.moments_centroid.x, x+1.3, atol=0.01)
         np.testing.assert_allclose(hsm.moments_centroid.y, y-0.8, atol=0.01)
 
         # Also allowed is center=True to place in the center of the image.
-        im5 = psf.draw(x, y, chipnum, center=True)
+        im5 = psf.draw(x, y, chipnum, center=True, apodize=None)
         assert im5.bounds == im1.bounds
         assert im5.array.shape == (48,48)
         np.testing.assert_allclose(im5.bounds.true_center.x, x, atol=0.5)
@@ -824,7 +824,7 @@ def test_draw():
         np.testing.assert_allclose(im6.array, im5.array, rtol=1.e-14, atol=1.e-14)
 
         # Check non-even stamp size.  Also, not unit flux while we're at it.
-        im7 = psf.draw(x, y, chipnum, center=(x+1.3,y-0.8), stamp_size=43, flux=23.7)
+        im7 = psf.draw(x, y, chipnum, center=(x+1.3,y-0.8), stamp_size=43, flux=23.7, apodize=None)
         assert im7.array.shape == (43,43)
         np.testing.assert_allclose(im7.bounds.true_center.x, x, atol=0.5)
         np.testing.assert_allclose(im7.bounds.true_center.y, y, atol=0.5)
@@ -836,7 +836,7 @@ def test_draw():
         # Can't do mixed even/odd shape with stamp_size, but it will respect a provided image.
         im8 = galsim.Image(43,44)
         im8.setCenter(x,y)  # It will respect the given bounds, so put it near the right place.
-        psf.draw(x, y, chipnum, center=(x+1.3,y-0.8), image=im8, flux=23.7)
+        psf.draw(x, y, chipnum, center=(x+1.3,y-0.8), image=im8, flux=23.7, apodize=None)
         assert im8.array.shape == (44,43)
         np.testing.assert_allclose(im8.array.sum(), 23.7, rtol=1.e-3)
         hsm = im8.FindAdaptiveMom()
